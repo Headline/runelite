@@ -35,6 +35,7 @@ import java.lang.invoke.MethodHandles;
 import java.lang.invoke.MethodType;
 import java.lang.reflect.Method;
 import java.lang.reflect.Modifier;
+import java.time.Instant;
 import java.util.Comparator;
 import java.util.function.Consumer;
 import javax.annotation.Nonnull;
@@ -43,6 +44,7 @@ import lombok.EqualsAndHashCode;
 import lombok.RequiredArgsConstructor;
 import lombok.Value;
 import lombok.extern.slf4j.Slf4j;
+import net.runelite.api.events.ClientTick;
 import net.runelite.client.util.ReflectUtil;
 import org.slf4j.Marker;
 import org.slf4j.MarkerFactory;
@@ -53,7 +55,7 @@ import org.slf4j.MarkerFactory;
 public class EventBus
 {
 	private static final Marker DEDUPLICATE = MarkerFactory.getMarker("DEDUPLICATE");
-
+	private static final long MAX_EXEC_MILLIS = 4;
 	@Value
 	public static class Subscriber
 	{
@@ -62,6 +64,11 @@ public class EventBus
 		private final float priority;
 		@EqualsAndHashCode.Exclude
 		private final Consumer<Object> lambda;
+
+		String getMethodName()
+		{
+			return method.getDeclaringClass() + "." + method.getName();
+		}
 
 		void invoke(final Object arg) throws Exception
 		{
@@ -216,8 +223,10 @@ public class EventBus
 	 */
 	public void post(@Nonnull final Object event)
 	{
+		long totalStartTime = System.currentTimeMillis();
 		for (final Subscriber subscriber : subscribers.get(event.getClass()))
 		{
+			long startTime = System.currentTimeMillis();
 			try
 			{
 				subscriber.invoke(event);
@@ -226,6 +235,16 @@ public class EventBus
 			{
 				exceptionHandler.accept(e);
 			}
+			long diff = System.currentTimeMillis() - startTime;
+			if (diff > MAX_EXEC_MILLIS)
+			{
+				log.warn("Subscriber {} took too long to execute! ({}ms)", subscriber.getMethodName(), diff);
+			}
+		}
+		long totalDiff = System.currentTimeMillis() - totalStartTime;
+		if (totalDiff > 10)
+		{
+			log.warn("Total event processing for {} took {}ms", event.getClass().getName(), totalDiff);
 		}
 	}
 }
